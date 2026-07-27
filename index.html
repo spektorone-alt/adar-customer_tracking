@@ -160,7 +160,15 @@ async function pollDriverLocation() {
     const result = await res.json();
 
     if (!result.ok || !result.location) {
-      document.getElementById('statusMsg').textContent = 'עדיין לא התקבל מיקום מהנהג - נסה שוב בעוד רגע';
+      if (driverMarker) {
+        // היה לנו קודם מיקום, וכעת הוא נעלם - הנהג עצר את השידור
+        map.removeLayer(driverMarker);
+        driverMarker = null;
+        document.getElementById('distanceValue').textContent = '--';
+        document.getElementById('statusMsg').textContent = 'הנהג סיים לשדר מיקום - המעקב הסתיים';
+      } else {
+        document.getElementById('statusMsg').textContent = 'עדיין לא התקבל מיקום מהנהג - נסה שוב בעוד רגע';
+      }
       return;
     }
 
