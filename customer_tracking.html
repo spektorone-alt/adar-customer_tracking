@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מעקב משלוח - אדר בצקים</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root {
+    --green-900: #1b4332;
+    --green-700: #2d6a4f;
+    --green-100: #d8f3dc;
+    --paper: #fbfaf7;
+    --ink: #1e2321;
+    --muted: #6b7570;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  }
+  header {
+    background: var(--green-900);
+    color: white;
+    padding: 18px 20px;
+    text-align: center;
+  }
+  header h1 { font-size: 18px; margin: 0 0 4px; }
+  header p { margin: 0; font-size: 13px; color: var(--green-100); }
+  #map { height: 46vh; width: 100%; }
+  .info-panel {
+    background: white;
+    padding: 20px;
+    text-align: center;
+    border-bottom: 1px solid #e3e6e1;
+  }
+  .distance-value {
+    font-size: 34px; font-weight: 800; color: var(--green-700);
+    margin: 4px 0;
+  }
+  .distance-label { font-size: 13px; color: var(--muted); }
+  .updated-at { font-size: 11.5px; color: var(--muted); margin-top: 10px; }
+  .status-msg {
+    text-align: center; padding: 20px; color: var(--muted); font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🚚 מעקב משלוח חי</h1>
+  <p id="customerNameLabel">אדר בצקים</p>
+</header>
+
+<div id="map"></div>
+
+<div class="info-panel">
+  <div class="distance-label">מרחק הנהג מכם</div>
+  <div class="distance-value" id="distanceValue">--</div>
+  <div class="updated-at" id="updatedAt"></div>
+</div>
+
+<div id="statusMsg" class="status-msg"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyeG-D6g3GT_ugNBeO-Z4Qq5Pq2StvDmFCezZ_aMinq8K719VdHnsW_XRbkz4aaZo12hQ/exec';
+
+const params = new URLSearchParams(window.location.search);
+const driverName = params.get('driver') || '';
+const customerLat = parseFloat(params.get('lat'));
+const customerLng = parseFloat(params.get('lng'));
+const customerName = params.get('name') || '';
+
+if (customerName) {
+  document.getElementById('customerNameLabel').textContent = customerName + ' · אדר בצקים';
+}
+
+let map, driverMarker, customerMarker;
+
+function initMap() {
+  const centerLat = !isNaN(customerLat) ? customerLat : 32.0853;
+  const centerLng = !isNaN(customerLng) ? customerLng : 34.7818;
+
+  map = L.map('map').setView([centerLat, centerLng], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19
+  }).addTo(map);
+
+  if (!isNaN(customerLat) && !isNaN(customerLng)) {
+    customerMarker = L.marker([customerLat, customerLng], {
+      icon: L.divIcon({ html: '📍', className: '', iconSize: [30, 30] })
+    }).addTo(map).bindPopup('אצלכם');
+  }
+}
+
+function haversineDistanceKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+async function pollDriverLocation() {
+  if (!driverName) {
+    document.getElementById('statusMsg').textContent = 'לא סופק שם נהג בקישור';
+    return;
+  }
+  try {
+    const res = await fetch(WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'getDriverLocation', data: { driver: driverName } })
+    });
+    const result = await res.json();
+
+    if (!result.ok || !result.location) {
+      document.getElementById('statusMsg').textContent = 'עדיין לא התקבל מיקום מהנהג - נסה שוב בעוד רגע';
+      return;
+    }
+
+    document.getElementById('statusMsg').textContent = '';
+    const loc = result.location;
+
+    if (!driverMarker) {
+      driverMarker = L.marker([loc.lat, loc.lng], {
+        icon: L.divIcon({ html: '🚚', className: '', iconSize: [30, 30] })
+      }).addTo(map).bindPopup('הנהג');
+    } else {
+      driverMarker.setLatLng([loc.lat, loc.lng]);
+    }
+
+    if (!isNaN(customerLat) && !isNaN(customerLng)) {
+      const dist = haversineDistanceKm(loc.lat, loc.lng, customerLat, customerLng);
+      document.getElementById('distanceValue').textContent = dist < 1
+        ? Math.round(dist * 1000) + ' מ׳'
+        : dist.toFixed(1) + ' ק"מ';
+
+      const bounds = L.latLngBounds([[loc.lat, loc.lng], [customerLat, customerLng]]);
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+
+    if (loc.updatedAt) {
+      const updated = new Date(loc.updatedAt);
+      document.getElementById('updatedAt').textContent = 'עודכן לאחרונה: ' + updated.toLocaleTimeString('he-IL');
+    }
+  } catch (err) {
+    document.getElementById('statusMsg').textContent = 'שגיאת תקשורת - מנסה שוב...';
+  }
+}
+
+initMap();
+pollDriverLocation();
+setInterval(pollDriverLocation, 10000);
+</script>
+
+</body>
+</html>
